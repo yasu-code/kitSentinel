@@ -32,24 +32,32 @@ def get_secrets() -> dict:
     return json.loads(response["SecretString"])
 
 
-def get_target_week(event: dict) -> tuple[list[datetime], list[str]]:
+def get_target_week(event: dict) -> tuple[list[datetime], list[str], str]:
     """日付リストを返す。
     - date指定あり: 指定日が含まれる週（月〜日）
-    - date指定なし: 今日を基準とした再来週（月〜日）
+    - date指定なし: 締め切り（水曜）基準で対象週を決定
+        - 月・火・水に実行 → 来週（月〜日）
+        - 木・金・土・日に実行 → 再来週（月〜日）
     """
     if event and "date" in event:
         base_date = datetime.strptime(event["date"], "%Y-%m-%d").replace(tzinfo=JST)
         monday = base_date - timedelta(days=base_date.weekday())
+        week_label = "指定週"
     else:
         base_date = datetime.now(JST)
-        days_until_monday = 14 - base_date.weekday()
+        weekday = base_date.weekday()  # 0=月, 1=火, 2=水, 3=木, 4=金, 5=土, 6=日
+        if weekday <= 2:  # 月〜水: 来週を確認
+            days_until_monday = 7 - weekday
+            week_label = "来週"
+        else:  # 木〜日: 再来週を確認
+            days_until_monday = 14 - weekday
+            week_label = "再来週"
         monday = base_date + timedelta(days=days_until_monday)
 
     dates = [monday + timedelta(days=i) for i in range(7)]
     day_numbers = [d.strftime("%-d") for d in dates]
 
-    print("test2", day_numbers)
-    return dates, day_numbers
+    return dates, day_numbers, week_label
 
 
 def send_line_message(token: str, user_id: str, message: str) -> None:
@@ -69,12 +77,12 @@ def send_line_message(token: str, user_id: str, message: str) -> None:
     logger.info("LINE通知送信完了: %s", resp.status_code)
 
 
-def send_line_alert(token: str, user_id: str, dates: list[datetime], site_url: str) -> None:
+def send_line_alert(token: str, user_id: str, dates: list[datetime], site_url: str, week_label: str = "再来週") -> None:
     start = dates[0].strftime("%m/%d")
     end = dates[-1].strftime("%m/%d")
     message = (
         f"【警告】ミールキット未予約\n"
-        f"再来週（{start}〜{end}）の予約が1件もありません。\n"
+        f"{week_label}（{start}〜{end}）の予約が1件もありません。\n"
         f"至急確認してください。\n"
         f"{site_url}"
     )
@@ -155,7 +163,7 @@ def handler(event: dict, context) -> dict:
     line_user_id = secrets["LINE_USER_ID"]
 
     try:
-        dates, day_numbers = get_target_week(event)
+        dates, day_numbers, week_label = get_target_week(event)
     except Exception:
         logger.error("日付計算失敗\n%s", traceback.format_exc())
         send_line_error_alert(line_token, line_user_id, "日付計算に失敗しました。", site_url)
@@ -203,14 +211,10 @@ def handler(event: dict, context) -> dict:
             if "ログアウト" not in page.content() and "logout" not in page.url:
                 logger.warning("ログイン後のページにログアウトリンクが見つかりません（要確認）")
 
-            logger.info("step1")
-
             # 月跨ぎ対応
             target_year = dates[0].year
             target_month = dates[0].month
             navigate_to_month(page, target_month, target_year)
-
-            logger.info("step2")
             # 月末〜月初を跨ぐ場合、翌月分も確認
             if dates[-1].month != target_month:
                 reserved_days += check_reservations(page, day_numbers[:dates[-1].day])
@@ -247,7 +251,7 @@ def handler(event: dict, context) -> dict:
         dates[-1].strftime("%Y-%m-%d"),
     )
     try:
-        send_line_alert(line_token, line_user_id, dates, site_url)
+        send_line_alert(line_token, line_user_id, dates, site_url, week_label)
     except Exception:
         logger.error("LINE通知失敗\n%s", traceback.format_exc())
         return {"status": "ALERT", "line_notify": "failed"}

@@ -157,10 +157,10 @@ def handler(event: dict, context) -> dict:
         logger.error("Secrets取得失敗\n%s", traceback.format_exc())
         return {"status": "ERROR", "reason": "secrets_fetch_failed"}
 
-    site_login_id = secrets["SITE_LOGIN_ID"]
-    site_login_pw = secrets["SITE_LOGIN_PW"]
-    line_token = secrets["LINE_CHANNEL_ACCESS_TOKEN"]
-    line_user_id = secrets["LINE_USER_ID"]
+    site_login_id = secrets[os.environ.get("KEY_SITE_LOGIN_ID", "SITE_LOGIN_ID")]
+    site_login_pw = secrets[os.environ.get("KEY_SITE_LOGIN_PW", "SITE_LOGIN_PW")]
+    line_token = secrets[os.environ.get("KEY_LINE_CHANNEL_ACCESS_TOKEN", "LINE_CHANNEL_ACCESS_TOKEN")]
+    line_user_id = secrets[os.environ.get("KEY_LINE_USER_ID", "LINE_USER_ID")]
 
     try:
         dates, day_numbers, week_label = get_target_week(event)
